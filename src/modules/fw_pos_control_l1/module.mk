@@ -42,7 +42,8 @@ SRCS		= fw_pos_control_l1_main.cpp \
 		  landingslope.cpp \
 		  mtecs/mTecs.cpp \
 		  mtecs/limitoverride.cpp \
-		  mtecs/mTecs_params.c
+		  mtecs/mTecs_params.c \
+		  takeoff_control.cpp
 
 MODULE_STACKSIZE = 1200
 

@@ -39,8 +39,10 @@
  */
 
 #include <float.h>
-
+#include <mavlink/mavlink_log.h>
 #include "ecl_l1_pos_controller.h"
+#include <stdio.h>
+#include <fcntl.h>
 
 float ECL_L1_Pos_Controller::nav_roll()
 {
@@ -84,7 +86,7 @@ float ECL_L1_Pos_Controller::crosstrack_error(void)
 {
 	return _crosstrack_error;
 }
-
+static int _mavlink_fdd =-1;
 void ECL_L1_Pos_Controller::navigate_waypoints(const math::Vector<2> &vector_A, const math::Vector<2> &vector_B, const math::Vector<2> &vector_curr_position,
 				       const math::Vector<2> &ground_speed_vector)
 {
@@ -97,6 +99,7 @@ void ECL_L1_Pos_Controller::navigate_waypoints(const math::Vector<2> &vector_A, 
 
 	/* get the direction between the last (visited) and next waypoint */
 	_target_bearing = get_bearing_to_next_waypoint(vector_curr_position(0), vector_curr_position(1), vector_B(0), vector_B(1));
+    warnx("target bearing: %.2f", (double)_target_bearing);
 
 	/* enforce a minimum ground speed of 0.1 m/s to avoid singularities */
 	float ground_speed = math::max(ground_speed_vector.length(), 0.1f);
@@ -208,7 +211,21 @@ void ECL_L1_Pos_Controller::navigate_waypoints(const math::Vector<2> &vector_A, 
 	_circle_mode = false;
 
 	/* the bearing angle, in NED frame */
+
+    /* XXX Hack to get mavlink output going */
+    if (_mavlink_fdd < 0) {
+        /* try to open the mavlink log device every once in a while */
+        _mavlink_fdd = open(MAVLINK_LOG_DEVICE, 0);
+    }
+
+
 	_bearing_error = eta;
+static int aaa = 0;
+if (aaa++ == 10) {
+    aaa= 0;
+    mavlink_log_critical(_mavlink_fdd, "update wp:  nav_bearing  %.2f, target_bearing %.2f",
+                                    (double)_nav_bearing, (double)_target_bearing);
+}
 }
 
 void ECL_L1_Pos_Controller::navigate_loiter(const math::Vector<2> &vector_A, const math::Vector<2> &vector_curr_position, float radius, int8_t loiter_direction,

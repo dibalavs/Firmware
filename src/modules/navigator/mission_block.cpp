@@ -101,19 +101,19 @@ MissionBlock::is_mission_item_reached()
 							  _navigator->get_global_position()->lon,
 							  _navigator->get_global_position()->alt,
 				&dist_xy, &dist_z);
-
-		if (_mission_item.nav_cmd == NAV_CMD_TAKEOFF && _navigator->get_vstatus()->is_rotary_wing) {
-			/* require only altitude for takeoff for multicopter */
+        dist = dist_xy;
+static int aaa = 0;
+if (aaa++ == 10) {
+    aaa = 0;
+mavlink_log_critical(_navigator->get_mavlink_fd(), "dist: %.2f", (double)dist);
+}
+        if (_mission_item.nav_cmd == NAV_CMD_TAKEOFF) {
+            /* require only altitude for takeoff for multicopter and fixed wing */
 			if (_navigator->get_global_position()->alt >
 				altitude_amsl - _navigator->get_acceptance_radius()) {
 				_waypoint_position_reached = true;
 			}
-		} else if (_mission_item.nav_cmd == NAV_CMD_TAKEOFF) {
-			/* for takeoff mission items use the parameter for the takeoff acceptance radius */
-			if (dist >= 0.0f && dist <= _navigator->get_acceptance_radius()) {
-				_waypoint_position_reached = true;
-			}
-		} else if (!_navigator->get_vstatus()->is_rotary_wing &&
+        } else if (!_navigator->get_vstatus()->is_rotary_wing &&
 			(_mission_item.nav_cmd == NAV_CMD_LOITER_UNLIMITED ||
 			_mission_item.nav_cmd == NAV_CMD_LOITER_TIME_LIMIT ||
 			_mission_item.nav_cmd == NAV_CMD_LOITER_TURN_COUNT)) {
@@ -130,13 +130,14 @@ MissionBlock::is_mission_item_reached()
 			/* for normal mission items used their acceptance radius */
 			if (dist >= 0.0f && dist <= _mission_item.acceptance_radius) {
 				_waypoint_position_reached = true;
+mavlink_log_critical(_navigator->get_mavlink_fd(), "Waypoint distance reached");
 			}
 		}
 	}
 
 	/* Check if the waypoint and the requested yaw setpoint. */
 	if (_waypoint_position_reached && !_waypoint_yaw_reached) {
-
+mavlink_log_critical(_navigator->get_mavlink_fd(), "Waypoint distance and yaw reached. is rotary: %d", (int)_navigator->get_vstatus()->is_rotary_wing);
 		/* TODO: removed takeoff, why? */
 		if (_navigator->get_vstatus()->is_rotary_wing && isfinite(_mission_item.yaw)) {
 
@@ -148,6 +149,7 @@ MissionBlock::is_mission_item_reached()
 			}
 
 		} else {
+ mavlink_log_critical(_navigator->get_mavlink_fd(), "Waypoint yaw reached");
 			_waypoint_yaw_reached = true;
 		}
 	}
