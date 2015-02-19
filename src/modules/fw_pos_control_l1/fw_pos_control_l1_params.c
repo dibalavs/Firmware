@@ -166,6 +166,15 @@ PARAM_DEFINE_FLOAT(FW_THR_MIN, 0.0f);
 PARAM_DEFINE_FLOAT(FW_THR_LND_MAX, 1.0f);
 
 /**
+ * Throttle limit value during taxiing phase(maneuvers before takeoff)
+ * @unit %
+ * @min 0.0
+ * @min 1.0
+ * @group L1 Contro
+ */
+PARAM_DEFINE_FLOAT(FW_THR_TXNG, 0.2f);
+
+/**
  * Climbout Altitude difference
  *
  * If the altitude error exceeds this parameter, the system will climb out

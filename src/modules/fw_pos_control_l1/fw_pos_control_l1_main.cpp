@@ -241,7 +241,7 @@ private:
 		float throttle_max;
 		float throttle_cruise;
 		float throttle_slew_max;
-
+		float throttle_taxiing;
 		float throttle_land_max;
 
 		float land_slope_angle;
@@ -289,8 +289,8 @@ private:
 		param_t throttle_max;
 		param_t throttle_cruise;
 		param_t throttle_slew_max;
-
 		param_t throttle_land_max;
+		param_t throttle_taxiing;
 
 		param_t land_slope_angle;
 		param_t land_H1_virt;
@@ -511,6 +511,7 @@ FixedwingPositionControl::FixedwingPositionControl() :
 	_parameter_handles.throttle_slew_max = param_find("FW_THR_SLEW_MAX");
 	_parameter_handles.throttle_cruise = param_find("FW_THR_CRUISE");
 	_parameter_handles.throttle_land_max = param_find("FW_THR_LND_MAX");
+	_parameter_handles.throttle_taxiing = param_find("FW_THR_TXNG");
 
 	_parameter_handles.land_slope_angle = param_find("FW_LND_ANG");
 	_parameter_handles.land_H1_virt = param_find("FW_LND_HVIRT");
@@ -589,6 +590,7 @@ FixedwingPositionControl::parameters_update()
 	param_get(_parameter_handles.throttle_slew_max, &(_parameters.throttle_slew_max));
 
 	param_get(_parameter_handles.throttle_land_max, &(_parameters.throttle_land_max));
+	param_get(_parameter_handles.throttle_taxiing, &(_parameters.throttle_taxiing));
 
 	param_get(_parameter_handles.time_const, &(_parameters.time_const));
 	param_get(_parameter_handles.time_const_throt, &(_parameters.time_const_throt));
@@ -1003,15 +1005,65 @@ void FixedwingPositionControl::control_position_takeoff(const struct position_se
 							float eas2tas,
 							math::Vector<2> ground_speed_2d)
 {
-	_l1_control.navigate_waypoints(prev_wp, curr_wp, current_position, ground_speed_2d);
+	const bool has_yaw_pos = isfinite(pos_sp_triplet.current.yaw);
+	const float yaw_error = _wrap_pi(pos_sp_triplet.current.yaw - _global_pos.yaw);
+
+	/* Need rotate the plane to takeoff yaw */
+	const bool need_taxiing = has_yaw_pos && fabsf(yaw_error) > math::radians(5.0f);
+
+	if (launch_detection_state == LAUNCHDETECTION_RES_NONE) {
+		_att_sp.roll_reset_integral = true;
+		_att_sp.pitch_reset_integral = true;
+		_att_sp.yaw_reset_integral = true;
+	}
+
+	if (!need_taxiing && launch_detection_state == LAUNCHDETECTION_RES_NONE) {
+		launch_detection_state = LAUNCHDETECTION_RES_DETECTED_ENABLEMOTORS;
+	} else if (need_taxiing) {
+		switch (launch_detection_state) {
+		case LAUNCHDETECTION_RES_DETECTED_ENABLEMOTORS:
+			// ERROR we need extra stop.
+			_att_sp.thrust = 0;
+			return;
+
+		case LAUNCHDETECTION_RES_NONE:
+			launch_detection_state = LAUNCHDETECTION_RES_DETECTED_ENABLECONTROL;
+			break;
+
+		default:
+			break;
+		}
+	}
+
+	/* We are in taxiing phase now */
+	if (launch_detection_state == LAUNCHDETECTION_RES_DETECTED_ENABLECONTROL) {
+		const uint64_t yaw_trigger_timeout = 6000000; // usec. (6sec)
+		const bool is_finished = fabsf(yaw_error) <= math::radians(2.0f);
+		const uint64_t now = hrt_absolute_time();
+		static uint64_t trigger_time = now;
+
+		if (is_finished && trigger_time < now) {
+			launch_detection_state = LAUNCHDETECTION_RES_DETECTED_ENABLEMOTORS;
+		} else {
+			trigger_time = is_finished ? trigger_time : (now + yaw_trigger_timeout);
+			_att_sp.thrust =  _parameters.throttle_taxiing;
+			_att_sp.roll_body = 0;
+			_att_sp.yaw_body = pos_sp_triplet.current.yaw;
+			_att_sp.pitch_body = 0;
+			return;
+		}
+	}
+
+	/* We are in LAUNCHDETECTION_RES_DETECTED_ENABLEMOTORS state. ready to Takeoff */
+
+	if (has_yaw_pos) {
+		_l1_control.navigate_heading(pos_sp_triplet.current.yaw, _global_pos.yaw, ground_speed_2d);
+	} else {
+		_l1_control.navigate_waypoints(prev_wp, curr_wp, current_position, ground_speed_2d);
+	}
+
 	_att_sp.roll_body = _l1_control.nav_roll();
 	_att_sp.yaw_body = _l1_control.nav_bearing();
-
-	/* Select throttle: only in LAUNCHDETECTION_RES_DETECTED_ENABLEMOTORS we want to use
-	 * full throttle, otherwise we use the preTakeOff Throttle */
-	float takeoff_throttle = launch_detection_state !=
-		LAUNCHDETECTION_RES_DETECTED_ENABLEMOTORS ?
-		launchDetector.getThrottlePreTakeoff() : _parameters.throttle_max;
 
 	/* select maximum pitch: the launchdetector may impose another limit for the pitch
 	 * depending on the state of the launch */
@@ -1031,7 +1083,7 @@ void FixedwingPositionControl::control_position_takeoff(const struct position_se
 				eas2tas,
 				math::radians(_parameters.pitch_limit_min),
 				takeoff_pitch_max_rad,
-				_parameters.throttle_min, takeoff_throttle,
+				_parameters.throttle_min, _parameters.throttle_max,
 				_parameters.throttle_cruise,
 				true,
 				math::max(math::radians(pos_sp_triplet.current.pitch_min),
@@ -1052,7 +1104,7 @@ void FixedwingPositionControl::control_position_takeoff(const struct position_se
 				math::radians(_parameters.pitch_limit_min),
 				math::radians(_parameters.pitch_limit_max),
 				_parameters.throttle_min,
-				takeoff_throttle,
+				_parameters.throttle_max,
 				_parameters.throttle_cruise,
 				false,
 				math::radians(_parameters.pitch_limit_min),
@@ -1419,13 +1471,14 @@ bool FixedwingPositionControl::control_position(const math::Vector<2> &current_p
 	if (_vehicle_status.engine_failure || _vehicle_status.engine_failure_cmd) {
 		/* Set thrust to 0 to minimize damage */
 		_att_sp.thrust = 0.0f;
-	} else if (_control_mode_current ==  FW_POSCTRL_MODE_AUTO && // launchdetector only available in auto
+	} else if (launchDetector.launchDetectionEnabled() &&
+		   _control_mode_current ==  FW_POSCTRL_MODE_AUTO && // launchdetector only available in auto
 			pos_sp_triplet.current.type == position_setpoint_s::SETPOINT_TYPE_TAKEOFF &&
 			launch_detection_state != LAUNCHDETECTION_RES_DETECTED_ENABLEMOTORS) {
 		 /* making sure again that the correct thrust is used,
 		 * without depending on library calls for safety reasons */
 		_att_sp.thrust = launchDetector.getThrottlePreTakeoff();
-	} else {
+	} else if (launch_detection_state == LAUNCHDETECTION_RES_DETECTED_ENABLEMOTORS){
 		/* Copy thrust and pitch values from tecs */
 		_att_sp.thrust = math::min(_mTecs.getEnabled() ? _mTecs.getThrottleSetpoint() :
 				_tecs.get_throttle_demand(), throttle_max);
@@ -1435,7 +1488,7 @@ bool FixedwingPositionControl::control_position(const math::Vector<2> &current_p
 	 * already (not by tecs) */
 	if (!(_control_mode_current ==  FW_POSCTRL_MODE_AUTO &&
 				pos_sp_triplet.current.type == position_setpoint_s::SETPOINT_TYPE_TAKEOFF &&
-				launch_detection_state == LAUNCHDETECTION_RES_NONE)) {
+				launch_detection_state != LAUNCHDETECTION_RES_DETECTED_ENABLEMOTORS)) {
 		_att_sp.pitch_body = _mTecs.getEnabled() ? _mTecs.getPitchSetpoint() : _tecs.get_pitch_demand();
 	}
 
