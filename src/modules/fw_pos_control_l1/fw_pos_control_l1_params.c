@@ -187,6 +187,17 @@ PARAM_DEFINE_FLOAT(FW_THR_TXNG, 0.2f);
 PARAM_DEFINE_FLOAT(FW_CLMBOUT_DIFF, 25.0f);
 
 /**
+ * Takeoff best rate-of-climb speed (Vy)
+ *
+ * At this speed aircraft has optimal parameter to acheive
+ * best rate-of-climb
+ * @unit m/s
+ * @min 0.0
+ * @group L1 Control
+ */
+PARAM_DEFINE_FLOAT(FW_TKF_CLMB_SPD, 38.0f);
+
+/**
  * Maximum climb rate
  *
  * This is the best climb rate that the aircraft can achieve with

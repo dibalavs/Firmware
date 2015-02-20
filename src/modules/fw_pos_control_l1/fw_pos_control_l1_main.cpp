@@ -253,6 +253,7 @@ private:
 		float land_flare_pitch_max_deg;
 		int land_use_terrain_estimate;
 
+		float takeoff_climb_speed;
 	}		_parameters;			/**< local copies of interesting parameters */
 
 	struct {
@@ -300,6 +301,8 @@ private:
 		param_t land_flare_pitch_min_deg;
 		param_t land_flare_pitch_max_deg;
 		param_t land_use_terrain_estimate;
+
+		param_t takeoff_climb_speed;
 
 	}		_parameter_handles;		/**< handles for interesting parameters */
 
@@ -540,6 +543,8 @@ FixedwingPositionControl::FixedwingPositionControl() :
 	_parameter_handles.heightrate_ff =			param_find("FW_T_HRATE_FF");
 	_parameter_handles.speedrate_p =			param_find("FW_T_SRATE_P");
 
+	_parameter_handles.takeoff_climb_speed =	param_find("FW_TKF_CLMB_SPD");
+
 	/* fetch initial parameter values */
 	parameters_update();
 }
@@ -625,6 +630,8 @@ FixedwingPositionControl::parameters_update()
 	param_get(_parameter_handles.land_flare_pitch_min_deg, &(_parameters.land_flare_pitch_min_deg));
 	param_get(_parameter_handles.land_flare_pitch_max_deg, &(_parameters.land_flare_pitch_max_deg));
 	param_get(_parameter_handles.land_use_terrain_estimate, &(_parameters.land_use_terrain_estimate));
+
+	param_get(_parameter_handles.takeoff_climb_speed, &(_parameters.takeoff_climb_speed));
 
 	_l1_control.set_l1_damping(_parameters.l1_damping);
 	_l1_control.set_l1_period(_parameters.l1_period);
@@ -1065,10 +1072,16 @@ void FixedwingPositionControl::control_position_takeoff(const struct position_se
 	_att_sp.roll_body = _l1_control.nav_roll();
 	_att_sp.yaw_body = _l1_control.nav_bearing();
 
-	/* select maximum pitch: the launchdetector may impose another limit for the pitch
-	 * depending on the state of the launch */
 	float takeoff_pitch_max_deg = launchDetector.getPitchMax(_parameters.pitch_limit_max);
-	float takeoff_pitch_max_rad = math::radians(takeoff_pitch_max_deg);
+	float takeoff_pitch_min_deg = _parameters.pitch_limit_min;
+
+	/* apply minimum pitch and limit roll if target altitude is not within climbout_diff
+	 * meters */
+	const float airspeed = calculate_target_airspeed(_parameters.takeoff_climb_speed);
+	if (airspeed < _parameters.takeoff_climb_speed) {
+		takeoff_pitch_max_deg = 0.0f;
+		takeoff_pitch_min_deg = 0.0f;
+	}
 
 	/* define altitude error */
 	float altitude_error = _pos_sp_triplet.current.alt - _global_pos.alt;
@@ -1079,10 +1092,10 @@ void FixedwingPositionControl::control_position_takeoff(const struct position_se
 
 		/* enforce a minimum of 10 degrees pitch up on takeoff, or take parameter */
 		tecs_update_pitch_throttle(_pos_sp_triplet.current.alt,
-				calculate_target_airspeed(1.3f * _parameters.airspeed_min),
+				airspeed,
 				eas2tas,
-				math::radians(_parameters.pitch_limit_min),
-				takeoff_pitch_max_rad,
+				math::radians(takeoff_pitch_min_deg),
+				math::radians(takeoff_pitch_max_deg),
 				_parameters.throttle_min, _parameters.throttle_max,
 				_parameters.throttle_cruise,
 				true,
