@@ -69,8 +69,13 @@ public:
 		_coordinated_min_speed = coordinated_min_speed;
 	}
 
+	void set_landed_state(bool is_landed) {
+		_is_landed = is_landed;
+	}
+
 protected:
 	float _coordinated_min_speed;
+	bool _is_landed;
 };
 
 #endif // ECL_YAW_CONTROLLER_H

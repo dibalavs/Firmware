@@ -48,7 +48,8 @@
 
 ECL_YawController::ECL_YawController() :
 	ECL_Controller("yaw"),
-	_coordinated_min_speed(1.0f)
+	_coordinated_min_speed(1.0f),
+	_is_landed(false)
 {
 }
 
@@ -73,7 +74,13 @@ float ECL_YawController::control_attitude(const struct ECL_ControlData &ctl_data
 //	static int counter = 0;
 	/* Calculate desired yaw rate from coordinated turn constraint / (no side forces) */
 	_rate_setpoint = 0.0f;
-	if (sqrtf(ctl_data.speed_body_u * ctl_data.speed_body_u + ctl_data.speed_body_v * ctl_data.speed_body_v +
+	if (_is_landed && isfinite(ctl_data.yaw) && isfinite(ctl_data.yaw_setpoint)) {
+		/* Calculate error */
+		float yaw_error = ctl_data.yaw_setpoint - ctl_data.yaw;
+
+		/* Apply P controller */
+		_rate_setpoint = yaw_error / _tc;
+	} else if (sqrtf(ctl_data.speed_body_u * ctl_data.speed_body_u + ctl_data.speed_body_v * ctl_data.speed_body_v +
 				ctl_data.speed_body_w * ctl_data.speed_body_w) > _coordinated_min_speed) {
 		float denumerator = (ctl_data.speed_body_u * cosf(ctl_data.roll) * cosf(ctl_data.pitch) +
 				ctl_data.speed_body_w * sinf(ctl_data.pitch));
@@ -139,14 +146,18 @@ float ECL_YawController::control_bodyrate(const struct ECL_ControlData &ctl_data
 	airspeed = ctl_data.airspeed_min;
 	}
 
+	float yaw_bodyrate = 0.0f;
+	if (_is_landed) {
+		_bodyrate_setpoint = _rate_setpoint;
+	} else {
+		/* Transform setpoint to body angular rates (jacobian) */
+		_bodyrate_setpoint = -sinf(ctl_data.roll) * ctl_data.pitch_rate_setpoint +
+			cosf(ctl_data.roll)*cosf(ctl_data.pitch) * _rate_setpoint;
 
-	/* Transform setpoint to body angular rates (jacobian) */
-	_bodyrate_setpoint = -sinf(ctl_data.roll) * ctl_data.pitch_rate_setpoint +
-		cosf(ctl_data.roll)*cosf(ctl_data.pitch) * _rate_setpoint;
-
-	/* Transform estimation to body angular rates (jacobian) */
-	float yaw_bodyrate = -sinf(ctl_data.roll) * ctl_data.pitch_rate +
-		cosf(ctl_data.roll)*cosf(ctl_data.pitch) * ctl_data.yaw_rate;
+		/* Transform estimation to body angular rates (jacobian) */
+		yaw_bodyrate = -sinf(ctl_data.roll) * ctl_data.pitch_rate +
+			cosf(ctl_data.roll)*cosf(ctl_data.pitch) * ctl_data.yaw_rate;
+	}
 
 	/* Calculate body angular rate error */
 	_rate_error = _bodyrate_setpoint - yaw_bodyrate; //body angular rate error
@@ -176,7 +187,6 @@ float ECL_YawController::control_bodyrate(const struct ECL_ControlData &ctl_data
 	/* Apply PI rate controller and store non-limited output */
 	_last_output = (_bodyrate_setpoint * _k_ff + _rate_error * _k_p + integrator_constrained) * ctl_data.scaler * ctl_data.scaler;  //scaler is proportional to 1/airspeed
 	//warnx("yaw:_last_output: %.4f, _integrator: %.4f, _integrator_max: %.4f, airspeed %.4f, _k_i %.4f, _k_p: %.4f", (double)_last_output, (double)_integrator, (double)_integrator_max, (double)airspeed, (double)_k_i, (double)_k_p);
-
 
 	return math::constrain(_last_output, -1.0f, 1.0f);
 }
