@@ -46,3 +46,6 @@ Firmware.zip
 unittests/build
 *.generated.h
 .vagrant
+px4.*
+build.sh
+upload.sh
